@@ -1,79 +1,281 @@
 #!/usr/bin/env python3
 import requests, time, sys
 from requests.auth import HTTPBasicAuth
-import pprint
+import logging
+import datetime
 import click
 import json
+import humanfriendly.tables as _hf_tables
+
+
+class Shelly:
+
+    def __init__(self, host, user, pw):
+        self.auth = HTTPBasicAuth(user, pw)
+        self.headers = {'Content-Type': 'application/json'}
+        self.host = f'http://{host}'
+
+    
+    def _get(self, path):
+        return requests.get(
+            url = f'{self.host}{path}',
+            headers = self.headers,
+            auth = self.auth,
+            )
+    
+
+    def get_meter(self):
+        try:
+            # Default paths for shelly 3EM
+            phase_a = self._get("/emeter/0").json()["power"]
+            phase_b = self._get("/emeter/1").json()["power"]    
+            phase_c = self._get("/emeter/2").json()["power"]    
+            total = phase_a + phase_b + phase_c
+        except Exception:
+            # Default path for other one phase shelly devices
+            phase_a = self._get("/meter/0").json()["power"]
+            phase_b = None
+            phase_c = None
+            total = phase_a
+
+        return {
+            "phase_a" : phase_a,
+            "phase_b" : phase_b,
+            "phase_c" : phase_c,
+            "total" : total,
+        }
+    
+
+    def get_status(self):
+        return self._get("/status")
 
 
 class OpenDtu:
 
     def __init__(self, host, user, pw):
         self.auth = HTTPBasicAuth(user, pw)
-        self.headers  = {'Content-Type': 'application/x-www-form-urlencoded'}
-        self.host = f'http://{host}/api/'
+        self.headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+        self.host = f'http://{host}/api'
 
-    def get(self, path):
-        return requests.get(url = f'{self.host}{path}').json()
 
+    def _get(self, path):
+        return requests.get(
+            url = f'{self.host}{path}',
+            auth = self.auth,
+            headers = self.headers,
+            )
+    
+
+    def _post(self, path, data):
+        return requests.post(
+            url = f'{self.host}{path}',
+            auth = self.auth,
+            headers = self.headers,
+            data = data,
+            )
+
+
+    def get_livedata(self):
+        return self._get("/livedata/status/inverters")
+
+
+    def get_data(self, path):
+        return self._get(path)
+    
+    
+    def set_limit(self, limit, serial):
+        data = f'data={{"serial":"{serial}", "limit_type":0, "limit_value":{limit}}}'
+        return self._post("/limit/config", data)
 
  
 @click.group()
-def cli():
-    pass
+@click.option("--opendtu_host", "-h", required=True, help="openDTU hostname/ip")
+@click.option("--opendtu_backup_host", help="openDTU backup hostname/ip")
+@click.option("--opendtu_user", "-u", required=True, help="openDTU user")
+@click.option("--opendtu_pw", "-p", required=True, help="openDTU password")
+@click.pass_obj
+def cli(obj, opendtu_host, opendtu_backup_host, opendtu_user, opendtu_pw):
+    obj["opendtu"] = OpenDtu(opendtu_host, opendtu_user, opendtu_pw)
+    obj["backup_opendtu"] = OpenDtu(opendtu_backup_host, opendtu_user, opendtu_pw)
+    
+
+@cli.command("get-data")
+@click.argument("path")
+@click.pass_obj
+def get_data(obj, path):
+    """Get api data by path"""
+    data = obj["opendtu"].get_data(path)
+    click.echo(data.content)
 
 
 @cli.command("list-inverters")
-@click.option("--opendtu_host", "-h", required=True, help="openDTU hostname/ip")
-@click.option("--opendtu_user", "-u", required=True, help="openDTU user")
-@click.option("--opendtu_pw", "-p", required=True, help="openDTU password")
 @click.option("--raw", "-r", is_flag=True, default=False, help="Raw output")
-def list_inverters(opendtu_host, opendtu_user, opendtu_pw, raw):
-    livedata = OpenDtu(opendtu_host, opendtu_user, opendtu_pw).get("livedata/status/inverters")
+@click.pass_obj
+def list_inverters(obj, raw):
+    """List all configured inverters"""
+    try:
+        livedata = obj["opendtu"].get_livedata().json()
+    except Exception as e:
+        click.echo(e)
+        exit(1)
 
     if raw:
-        print(json.dumps(livedata))
+        click.echo(json.dumps(livedata))
+    else:
+        data = []
+        columns = ["Name", "Serial", "Reachable", "Producing", "Power(Watt)", "Limit Relative(%)", "Limit absolute(Watt)"]
+        for j in livedata["inverters"]:
+            data.append(
+                [
+                    j["name"],
+                    j["serial"],
+                    j["reachable"],
+                    j["producing"],
+                    j["AC"]["0"]["Power"]["v"],
+                    j["limit_relative"],
+                    j["limit_absolute"],
+                ],
+            )
+
+        click.echo(_hf_tables.format_pretty_table(data, columns))
+
+
+@cli.command("set-limit")
+@click.argument("limit")
+@click.argument("serial")
+@click.pass_obj
+def set_limit(obj, limit, serial):
+    """Set inverter limit"""
+    try:
+        answer = obj["opendtu"].set_limit(limit, serial).json()
+        click.echo(answer)
+    except Exception as e:
+        click.echo(e)
+        exit(1)
+
+
+@cli.command("show-powermeter")
+@click.option("--pm_type", default="shelly", help="powermeter type")
+@click.option("--pm_host",  required=True, help="powermeter hostname/ip")
+@click.option("--pm_user", required=True, help="powermeter user")
+@click.option("--pm_pw", required=True, help="powermeter password")
+def powermeter(pm_type, pm_host, pm_user, pm_pw):
+    """Show powermeter values"""
+    if pm_type == "shelly":
+        pm_client = Shelly(pm_host, pm_user, pm_pw)
+    else:
+        click.echo("No support for this device type")
+        exit(1)
+
+    try:
+        power = pm_client.get_meter()
+        click.echo(power)
+    except Exception as e:
+        click.echo(e)
+        exit(1)
+
+
+@cli.command("dynamic-inverter-control")
+@click.option("--min",  required=True, type=int, help="powermeter hostname/ip")
+@click.option("--max",  required=True, type=int, help="powermeter hostname/ip")
+@click.option("--serial",  required=True, help="powermeter hostname/ip")
+@click.option("--pm_type", default="shelly", help="powermeter type")
+@click.option("--pm_host",  required=True, help="powermeter hostname/ip")
+@click.option("--pm_user", required=True, help="powermeter user")
+@click.option("--pm_pw", required=True, help="powermeter password")
+@click.option("--daemon", "-d", type=int, help="Run the command every n seconds")
+@click.pass_obj
+def dynamic_inverter_control(obj, min, max, serial, pm_type, pm_host, pm_user, pm_pw, daemon):
+    """Dynamic inverter control"""
+
+    if pm_type == "shelly":
+        pm_client = Shelly(pm_host, pm_user, pm_pw)
+    else:
+        click.echo("No support for this type of powermeter")
+        exit(1)
+
+    if (daemon and daemon < 4):
+        click.echo("Daemon interval must <= 5 seconds")
+        exit(1)
+
+    def _run():
+        today = datetime.date.today()
+        logging.basicConfig(filename=f"logs/{today}.log", format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
+
+        # Get inverter data
+        try:
+            try:
+                data = obj["opendtu"].get_livedata().json()
+            except Exception:
+                try:
+                    data = obj["backup_opendtu"].get_livedata().json()
+                    logging.warning("Main openDTU not reachable, backup openDTU was used")
+                except Exception:
+                    logging.warning("No opendtu host reachable") 
+
+                    return
+
+            configured = False
+            for i in data["inverters"]:
+                if i["serial"] == serial:
+                    configured = True
+                    reachable   = i['reachable'] 
+                    current_limit = int(i['limit_absolute'])
+                    power       = i['AC']['0']['Power']['v'] 
+
+            if not configured:
+                logging.critical(f"Inverter {serial} not configured")
+                exit(1)
+
+        except Exception as e:
+            logging.critical(f"ERROR: {e}")
+
+        # Get powermeter data
+        try:
+            pm_power = pm_client.get_meter()
+            pm_total_power = pm_power["total"]
+        except Exception as e:
+            click.echo(f"ERROR: {e}")
+            
+        logging.info(f"Purchase from network operator: {round(pm_total_power, 1)} Watt")
+        logging.info(f"PV production: {round(power, 1)} Watt")
+        logging.info(f"Total consumption: {round(pm_total_power + power, 1)} Watt")
+
+        if reachable:
+            # Calc new limit
+            new_limit = pm_total_power + current_limit - 5 
+
+            if new_limit > max:
+                new_limit = max
+            elif new_limit < min:
+                new_limit = min
+                
+            if new_limit != current_limit:
+                logging.info(f'Set inverter limit from {round(current_limit, 1)} to {round(new_limit, 1)} Watt. ', end='')
+                try:
+                    new_limit = obj["opendtu"].set_limit(int(new_limit), serial).json()
+                    logging.info(f'Send new config ({new_limit["type"]})')
+                except Exception:
+                    try:
+                        new_limit = obj["backup_opendtu"].set_limit(int(new_limit), serial).json()
+                        logging.warning(f'Send new config to backup openDTU ({new_limit["type"]})')
+                    except Exception as e:
+                        logging.critical(f"Failed to set config.\n{e}")
+
+        else:
+            logging.warning(f"Inverter {serial} not reachable")
+
+        sys.stdout.flush() 
+
+    if not daemon:
+        _run()
+    else:
+        while True:
+            _run()    
+            time.sleep(daemon)
+
 
 
 if __name__ == "__main__":
-    cli()
-  
-
-
-# Diese Daten müssen angepasst werden:
-#serial = "112100000000" # Seriennummer des Hoymiles Wechselrichters
-#maximum_wr = 300 # Maximale Ausgabe des Wechselrichters
-#minimum_wr = 100 # Minimale Ausgabe des Wechselrichters
-
-#dtu_ip = '192.168.23.199' # IP Adresse von OpenDTU
-#dtu_nutzer = 'admin' # OpenDTU Nutzername
-#dtu_passwort = '95Virtual$' # OpenDTU Passwort
-
-#shelly_ip = '192.168.23.192' # IP Adresse von Shelly 3EM
-
-
-#try:
-    # Nimmt Daten von der openDTU Rest-API und übersetzt sie in ein json-Format
-#    r = requests.get(url = f'http://{dtu_ip}/api/livedata/status/inverters' ).json()
-
-#    pprint.pprint(r)
-
-    # Selektiert spezifische Daten aus der json response
-#    reachable   = r['inverters'][0]['reachable'] # Ist DTU erreichbar?
-#    producing   = int(r['inverters'][0]['producing']) # Produziert der Wechselrichter etwas?
-#    altes_limit = int(r['inverters'][0]['limit_absolute']) # Altes Limit
-#    power_dc    = r['inverters'][0]['AC']['0']['Power DC']['v']  # Lieferung DC vom Panel
-#    power       = r['inverters'][0]['AC']['0']['Power']['v'] # Abgabe BKW AC in Watt
-#except:
-#    print('Fehler beim Abrufen der Daten von openDTU')
-
-#try:
-#    # Nimmt Daten von der Shelly 3EM Rest-API und übersetzt sie in ein json-Format
-#    phase_a     = requests.get(f'http://{shelly_ip}/emeter/0', headers={'Content-Type': 'application/json'}).json()['power']
-#    phase_b     = requests.get(f'http://{shelly_ip}/emeter/1', headers={'Content-Type': 'application/json'}).json()['power']
-#    phase_c     = requests.get(f'http://{shelly_ip}/emeter/2', headers={'Content-Type': 'application/json'}).json()['power']
-#    grid_sum    = phase_a + phase_b + phase_c # Aktueller Bezug - rechnet alle Phasen zusammennt
-#    print(grid_sum)
-#except:
-#    print('Fehler beim Abrufen der Daten von Shelly 3EM')
+    cli(obj={})
 
