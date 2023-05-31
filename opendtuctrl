@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-import requests, time, sys
+import requests 
+import time 
+import sys
 from requests.auth import HTTPBasicAuth
 import logging
 import datetime
@@ -86,8 +88,18 @@ class OpenDtu:
     def set_limit(self, limit, serial):
         data = f'data={{"serial":"{serial}", "limit_type":0, "limit_value":{limit}}}'
         return self._post("/limit/config", data)
+    
 
- 
+
+def pm(cmd):
+    cmd = click.option("--pm_type", default="shelly", help="powermeter type")(cmd)
+    cmd = click.option("--pm_host",  required=True, help="powermeter hostname/ip")(cmd)
+    cmd = click.option("--pm_user", required=True, help="powermeter user")(cmd)
+    cmd = click.option("--pm_pw", required=True, help="powermeter password")(cmd)
+
+    return cmd
+
+
 @click.group()
 @click.option("--opendtu_host", "-h", required=True, help="openDTU hostname/ip")
 @click.option("--opendtu_backup_host", help="openDTU backup hostname/ip")
@@ -155,10 +167,7 @@ def set_limit(obj, limit, serial):
 
 
 @cli.command("show-powermeter")
-@click.option("--pm_type", default="shelly", help="powermeter type")
-@click.option("--pm_host",  required=True, help="powermeter hostname/ip")
-@click.option("--pm_user", required=True, help="powermeter user")
-@click.option("--pm_pw", required=True, help="powermeter password")
+@pm
 def powermeter(pm_type, pm_host, pm_user, pm_pw):
     """Show powermeter values"""
     if pm_type == "shelly":
@@ -176,14 +185,11 @@ def powermeter(pm_type, pm_host, pm_user, pm_pw):
 
 
 @cli.command("dynamic-inverter-control")
-@click.option("--min",  required=True, type=int, help="powermeter hostname/ip")
-@click.option("--max",  required=True, type=int, help="powermeter hostname/ip")
-@click.option("--serial",  required=True, help="powermeter hostname/ip")
-@click.option("--pm_type", default="shelly", help="powermeter type")
-@click.option("--pm_host",  required=True, help="powermeter hostname/ip")
-@click.option("--pm_user", required=True, help="powermeter user")
-@click.option("--pm_pw", required=True, help="powermeter password")
+@click.option("--min",  required=True, type=int, help="Min inverter output")
+@click.option("--max",  required=True, type=int, help="Max inverter output")
+@click.option("--serial",  required=True, help="Inverter serial")
 @click.option("--daemon", "-d", type=int, help="Run the command every n seconds")
+@pm
 @click.pass_obj
 def dynamic_inverter_control(obj, min, max, serial, pm_type, pm_host, pm_user, pm_pw, daemon):
     """Dynamic inverter control"""
@@ -235,7 +241,7 @@ def dynamic_inverter_control(obj, min, max, serial, pm_type, pm_host, pm_user, p
             pm_power = pm_client.get_meter()
             pm_total_power = pm_power["total"]
         except Exception as e:
-            click.echo(f"ERROR: {e}")
+            logging.critical(f"ERROR: {e}")
             
         logging.info(f"Purchase from network operator: {round(pm_total_power, 1)} Watt")
         logging.info(f"PV production: {round(power, 1)} Watt")
@@ -273,7 +279,6 @@ def dynamic_inverter_control(obj, min, max, serial, pm_type, pm_host, pm_user, p
         while True:
             _run()    
             time.sleep(daemon)
-
 
 
 if __name__ == "__main__":
