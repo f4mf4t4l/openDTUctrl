@@ -20,9 +20,10 @@ class Shelly:
     
     def _get(self, path):
         return requests.get(
-            url = f'{self.host}{path}',
-            headers = self.headers,
-            auth = self.auth,
+            url=f'{self.host}{path}',
+            headers=self.headers,
+            auth=self.auth,
+            timeout=5,
             )
     
 
@@ -62,18 +63,20 @@ class OpenDtu:
 
     def _get(self, path):
         return requests.get(
-            url = f'{self.host}{path}',
-            auth = self.auth,
-            headers = self.headers,
+            url=f'{self.host}{path}',
+            auth=self.auth,
+            headers=self.headers,
+            timeout=5,
             )
     
 
     def _post(self, path, data):
         return requests.post(
-            url = f'{self.host}{path}',
-            auth = self.auth,
-            headers = self.headers,
-            data = data,
+            url=f'{self.host}{path}',
+            auth=self.auth,
+            headers=self.headers,
+            data=data,
+            timeout=5,
             )
 
 
