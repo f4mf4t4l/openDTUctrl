@@ -7,11 +7,11 @@ import logging
 import datetime
 import click
 import json
+import configparser
 import humanfriendly.tables as _hf_tables
 
 
 class Shelly:
-
     def __init__(self, host, user, pw):
         self.auth = HTTPBasicAuth(user, pw)
         self.headers = {'Content-Type': 'application/json'}
@@ -101,14 +101,14 @@ def pm(cmd):
 
 
 @click.group()
-@click.option("--opendtu_host", "-h", required=True, help="openDTU hostname/ip")
-@click.option("--opendtu_backup_host", help="openDTU backup hostname/ip")
-@click.option("--opendtu_user", "-u", required=True, help="openDTU user")
-@click.option("--opendtu_pw", "-p", required=True, help="openDTU password")
 @click.pass_obj
-def cli(obj, opendtu_host, opendtu_backup_host, opendtu_user, opendtu_pw):
-    obj["opendtu"] = OpenDtu(opendtu_host, opendtu_user, opendtu_pw)
-    obj["backup_opendtu"] = OpenDtu(opendtu_backup_host, opendtu_user, opendtu_pw)
+def cli(obj):
+    config = configparser.ConfigParser()
+    config.read("/opt/opendtuctrl/config/opendtuctrl.ini")
+    obj["config"] = config
+    dtu_config = config["DTU"]
+    obj["dtu01"] = OpenDtu(dtu_config["DTU01"], dtu_config["USER"], dtu_config["PASSWORD"])
+    obj["dtu02"] = OpenDtu(dtu_config["DTU02"], dtu_config["USER"], dtu_config["PASSWORD"])
     
 
 @cli.command("get-data")
@@ -116,7 +116,7 @@ def cli(obj, opendtu_host, opendtu_backup_host, opendtu_user, opendtu_pw):
 @click.pass_obj
 def get_data(obj, path):
     """Get api data by path"""
-    data = obj["opendtu"].get_data(path)
+    data = obj["dtu01"].get_data(path)
     click.echo(data.content)
 
 
@@ -126,7 +126,7 @@ def get_data(obj, path):
 def list_inverters(obj, raw):
     """List all configured inverters"""
     try:
-        livedata = obj["opendtu"].get_livedata().json()
+        livedata = obj["dtu01"].get_livedata().json()
     except Exception as e:
         click.echo(e)
         exit(1)
@@ -159,7 +159,7 @@ def list_inverters(obj, raw):
 def set_limit(obj, limit, serial):
     """Set inverter limit"""
     try:
-        answer = obj["opendtu"].set_limit(limit, serial).json()
+        answer = obj["dtu01"].set_limit(limit, serial).json()
         click.echo(answer)
     except Exception as e:
         click.echo(e)
@@ -167,11 +167,12 @@ def set_limit(obj, limit, serial):
 
 
 @cli.command("show-powermeter")
-@pm
-def powermeter(pm_type, pm_host, pm_user, pm_pw):
+@click.pass_obj
+def powermeter(obj):
     """Show powermeter values"""
-    if pm_type == "shelly":
-        pm_client = Shelly(pm_host, pm_user, pm_pw)
+    pm_config = obj["config"]["POWERMETER"]
+    if pm_config["TYPE"] == "shelly":
+        pm_client = Shelly(pm_config["HOST"], pm_config["USER"], pm_config["PASSWORD"])
     else:
         click.echo("No support for this device type")
         exit(1)
@@ -185,52 +186,55 @@ def powermeter(pm_type, pm_host, pm_user, pm_pw):
 
 
 @cli.command("dynamic-inverter-control")
-@click.option("--min",  required=True, type=int, help="Min inverter output")
-@click.option("--max",  required=True, type=int, help="Max inverter output")
-@click.option("--serial",  required=True, help="Inverter serial")
-@click.option("--daemon", "-d", type=int, help="Run the command every n seconds")
-@pm
 @click.pass_obj
-def dynamic_inverter_control(obj, min, max, serial, pm_type, pm_host, pm_user, pm_pw, daemon):
+def dynamic_inverter_control(obj):
     """Dynamic inverter control"""
 
-    if pm_type == "shelly":
-        pm_client = Shelly(pm_host, pm_user, pm_pw)
+    dtu_config = obj["config"]["DTU"]
+    pm_config = obj["config"]["POWERMETER"]
+    inverter_config = obj["config"]["INVERTER"]
+
+    if pm_config["TYPE"] == "shelly":
+        pm_client = Shelly(pm_config["HOST"], pm_config["USER"], pm_config["PASSWORD"])
     else:
         click.echo("No support for this type of powermeter")
         exit(1)
 
-    if (daemon and daemon < 4):
-        click.echo("Daemon interval must <= 5 seconds")
+    if int(dtu_config["INTERVAL"]) < 4:
+        click.echo("Check interval must <= 5 seconds")
         exit(1)
+
+    click.echo(f"Inverter min input = {inverter_config['MIN']}\nInverter max input = {inverter_config['MAX']}")
+    click.echo(f"Start inverter control\nCheck interval = {dtu_config['INTERVAL']} seconds")
 
     def _run():
         today = datetime.date.today()
-        logging.basicConfig(filename=f"logs/{today}.log", format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
+        logfile = f"/var/log/opendtuctrl/{today}.log"
+        logging.basicConfig(filename=logfile, format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
         # Get inverter data
         try:
             try:
-                data = obj["opendtu"].get_livedata().json()
+                data = obj["dtu01"].get_livedata().json()
             except Exception:
                 try:
-                    data = obj["backup_opendtu"].get_livedata().json()
-                    logging.warning("Main openDTU not reachable, backup openDTU was used")
+                    data = obj["dtu02"].get_livedata().json()
+                    logging.warning("DTU01 not reachable, backup DTU02 was used")
                 except Exception:
-                    logging.warning("No opendtu host reachable") 
+                    logging.warning("No DTU host reachable")
 
                     return
 
             configured = False
             for i in data["inverters"]:
-                if i["serial"] == serial:
+                if i["serial"] == inverter_config["SERIAL"]:
                     configured = True
-                    reachable   = i['reachable'] 
-                    current_limit = int(i['limit_absolute'])
-                    power       = i['AC']['0']['Power']['v'] 
+                    reachable = i["reachable"]
+                    current_limit = int(i["limit_absolute"])
+                    power = i["AC"]["0"]["Power"]["v"]
 
             if not configured:
-                logging.critical(f"Inverter {serial} not configured")
+                logging.critical(f"Inverter {inverter_config['SERIAL']} not configured")
                 exit(1)
 
         except Exception as e:
@@ -242,6 +246,7 @@ def dynamic_inverter_control(obj, min, max, serial, pm_type, pm_host, pm_user, p
             pm_total_power = pm_power["total"]
         except Exception as e:
             logging.critical(f"ERROR: {e}")
+            pm_total_power = 0
             
         logging.info(f"Purchase from network operator: {round(pm_total_power, 1)} Watt")
         logging.info(f"PV production: {round(power, 1)} Watt")
@@ -251,34 +256,34 @@ def dynamic_inverter_control(obj, min, max, serial, pm_type, pm_host, pm_user, p
             # Calc new limit
             new_limit = pm_total_power + current_limit - 5 
 
-            if new_limit > max:
-                new_limit = max
-            elif new_limit < min:
-                new_limit = min
+            if new_limit > int(inverter_config["MAX"]):
+                new_limit = int(inverter_config["MAX"])
+            elif new_limit < int(inverter_config["MIN"]):
+                new_limit = int(inverter_config["MIN"])
                 
             if new_limit != current_limit:
-                logging.info(f'Set inverter limit from {round(current_limit, 1)} to {round(new_limit, 1)} Watt. ', end='')
+                # Set new limit
+                logging.info(f'Set inverter limit from {round(current_limit, 1)} to {round(new_limit, 1)} Watt')
                 try:
-                    new_limit = obj["opendtu"].set_limit(int(new_limit), serial).json()
+                    new_limit = obj["dtu01"].set_limit(int(new_limit), inverter_config["SERIAL"]).json()
                     logging.info(f'Send new config ({new_limit["type"]})')
                 except Exception:
                     try:
-                        new_limit = obj["backup_opendtu"].set_limit(int(new_limit), serial).json()
+                        new_limit = obj["dtu02"].set_limit(int(new_limit), inverter_config["SERIAL"]).json()
                         logging.warning(f'Send new config to backup openDTU ({new_limit["type"]})')
                     except Exception as e:
                         logging.critical(f"Failed to set config.\n{e}")
+            else:
+                logging.info(f"Current limit of {current_limit} Watt remains unchanged")
 
         else:
-            logging.warning(f"Inverter {serial} not reachable")
+            logging.warning(f"Inverter {inverter_config['SERIAL']} not reachable")
 
         sys.stdout.flush() 
 
-    if not daemon:
+    while True:
         _run()
-    else:
-        while True:
-            _run()    
-            time.sleep(daemon)
+        time.sleep(int(dtu_config["INTERVAL"]))
 
 
 if __name__ == "__main__":

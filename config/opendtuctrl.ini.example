@@ -1,0 +1,21 @@
+[DTU]
+DTU01 = x.x.x.x
+# Backup DTU if present
+DTU02 = 
+USER = user
+PASSWORD = password
+# Minimum 5 seconds
+INTERVAL = 5
+
+[INVERTER]
+SERIAL = 12345678
+# Minimum = 10 Watt
+MIN = 10
+MAX = 60
+
+[POWERMETER]
+TYPE = shelly
+HOST = x.x.x.x
+USER = admin
+PASSWORD = password
+
