@@ -93,16 +93,6 @@ class OpenDtu:
         return self._post("/limit/config", data)
     
 
-
-def pm(cmd):
-    cmd = click.option("--pm_type", default="shelly", help="powermeter type")(cmd)
-    cmd = click.option("--pm_host",  required=True, help="powermeter hostname/ip")(cmd)
-    cmd = click.option("--pm_user", required=True, help="powermeter user")(cmd)
-    cmd = click.option("--pm_pw", required=True, help="powermeter password")(cmd)
-
-    return cmd
-
-
 @click.group()
 @click.pass_obj
 def cli(obj):
