@@ -201,7 +201,7 @@ def dynamic_inverter_control(obj):
     click.echo(f"Start inverter control\nCheck interval = {dtu_config['INTERVAL']} seconds")
 
     def _run():
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = datetime.datetime.now().strftime("%Y-%m-%d")
         logfile = f"/var/log/opendtuctrl/{today}.log"
         logging.basicConfig(filename=logfile, format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
