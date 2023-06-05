@@ -6,6 +6,8 @@ USER = user
 PASSWORD = password
 # Minimum 5 seconds
 INTERVAL = 5
+START_TIME = 3
+STOP_TIME = 23
 
 [INVERTER]
 SERIAL = 12345678

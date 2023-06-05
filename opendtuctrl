@@ -275,8 +275,23 @@ def dynamic_inverter_control(obj):
         sys.stdout.flush() 
 
     while True:
-        _run()
+
+        if dtu_config['START_TIME'] and dtu_config['STOP_TIME']:
+            start = datetime.time(dtu_config['START_TIME'], 0, 0)
+            end = datetime.time(dtu_config['STOP_TIME'], 0, 0)
+            current = datetime.datetime.now().time()
+            if (time_in_range(start, end, current)):
+                _run()
+            else:
+                logging.info(f'Skip check, not in time range')
+        else:
+            _run()
         time.sleep(int(dtu_config["INTERVAL"]))
+
+
+def time_in_range(start, end, current):
+    return start <= current <= end
+
 
 
 if __name__ == "__main__":
