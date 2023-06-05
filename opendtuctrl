@@ -277,8 +277,8 @@ def dynamic_inverter_control(obj):
     while True:
 
         if dtu_config['START_TIME'] and dtu_config['STOP_TIME']:
-            start = datetime.time(dtu_config['START_TIME'], 0, 0)
-            end = datetime.time(dtu_config['STOP_TIME'], 0, 0)
+            start = datetime.time(int(dtu_config['START_TIME']), 0, 0)
+            end = datetime.time(int(dtu_config['STOP_TIME']), 0, 0)
             current = datetime.datetime.now().time()
             if (time_in_range(start, end, current)):
                 _run()
