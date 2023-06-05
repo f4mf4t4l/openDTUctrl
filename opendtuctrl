@@ -280,10 +280,8 @@ def dynamic_inverter_control(obj):
             start = datetime.time(int(dtu_config['START_TIME']), 0, 0)
             end = datetime.time(int(dtu_config['STOP_TIME']), 0, 0)
             current = datetime.datetime.now().time()
-            if (time_in_range(start, end, current)):
+            if time_in_range(start, end, current):
                 _run()
-            else:
-                logging.info(f'Skip check, not in time range')
         else:
             _run()
         time.sleep(int(dtu_config["INTERVAL"]))
