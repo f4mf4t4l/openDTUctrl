@@ -4,6 +4,7 @@ import time
 import sys
 from requests.auth import HTTPBasicAuth
 import logging
+from logging.handlers import TimedRotatingFileHandler
 import datetime
 import click
 import json
@@ -187,6 +188,19 @@ def dynamic_inverter_control(obj):
     pm_config = obj["config"]["POWERMETER"]
     inverter_config = obj["config"]["INVERTER"]
 
+    logpath = "/var/log/opendtuctrl/dic.log"
+    logger = logging.getLogger("Dic rotating log")
+    logger.setLevel(logging.INFO)
+    loghandler = TimedRotatingFileHandler(
+        logpath,
+        when="midnight",
+        interval=1,
+        backupCount=0
+    )
+    loghandler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    logger.addHandler(loghandler)
+
+
     if pm_config["TYPE"] == "shelly":
         pm_client = Shelly(pm_config["HOST"], pm_config["USER"], pm_config["PASSWORD"])
     else:
@@ -201,10 +215,6 @@ def dynamic_inverter_control(obj):
     click.echo(f"Start inverter control\nCheck interval = {dtu_config['INTERVAL']} seconds")
 
     def _run():
-        today = datetime.datetime.now().strftime("%Y-%m-%d")
-        logfile = f"/var/log/opendtuctrl/{today}.log"
-        logging.basicConfig(filename=logfile, format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
-
         # Get inverter data
         try:
             try:
@@ -212,9 +222,9 @@ def dynamic_inverter_control(obj):
             except Exception:
                 try:
                     data = obj["dtu02"].get_livedata().json()
-                    logging.warning("DTU01 not reachable, backup DTU02 was used")
+                    logger.warning("DTU01 not reachable, backup DTU02 was used")
                 except Exception:
-                    logging.warning("No DTU host reachable")
+                    logger.warning("No DTU host reachable")
 
                     return
 
@@ -227,23 +237,23 @@ def dynamic_inverter_control(obj):
                     power = i["AC"]["0"]["Power"]["v"]
 
             if not configured:
-                logging.critical(f"Inverter {inverter_config['SERIAL']} not configured")
+                logger.critical(f"Inverter {inverter_config['SERIAL']} not configured")
                 exit(1)
 
         except Exception as e:
-            logging.critical(f"ERROR: {e}")
+            logger.critical(f"ERROR: {e}")
 
         # Get powermeter data
         try:
             pm_power = pm_client.get_meter()
             pm_total_power = pm_power["total"]
         except Exception as e:
-            logging.critical(f"ERROR: {e}")
+            logger.critical(f"ERROR: {e}")
             pm_total_power = 0
             
-        logging.info(f"Purchase from network operator: {round(pm_total_power, 1)} Watt")
-        logging.info(f"PV production: {round(power, 1)} Watt")
-        logging.info(f"Total consumption: {round(pm_total_power + power, 1)} Watt")
+        logger.info(f"Purchase from network operator: {round(pm_total_power, 1)} Watt")
+        logger.info(f"PV production: {round(power, 1)} Watt")
+        logger.info(f"Total consumption: {round(pm_total_power + power, 1)} Watt")
 
         if reachable:
             # Calc new limit
@@ -256,21 +266,21 @@ def dynamic_inverter_control(obj):
                 
             if new_limit != current_limit:
                 # Set new limit
-                logging.info(f'Set inverter limit from {round(current_limit, 1)} to {round(new_limit, 1)} Watt')
+                logger.info(f'Set inverter limit from {round(current_limit, 1)} to {round(new_limit, 1)} Watt')
                 try:
                     new_limit = obj["dtu01"].set_limit(int(new_limit), inverter_config["SERIAL"]).json()
-                    logging.info(f'Send new config ({new_limit["type"]})')
+                    logger.info(f'Send new config ({new_limit["type"]})')
                 except Exception:
                     try:
                         new_limit = obj["dtu02"].set_limit(int(new_limit), inverter_config["SERIAL"]).json()
-                        logging.warning(f'Send new config to backup openDTU ({new_limit["type"]})')
+                        logger.warning(f'Send new config to backup openDTU ({new_limit["type"]})')
                     except Exception as e:
-                        logging.critical(f"Failed to set config.\n{e}")
+                        logger.critical(f"Failed to set config.\n{e}")
             else:
-                logging.info(f"Current limit of {current_limit} Watt remains unchanged")
+                logger.info(f"Current limit of {current_limit} Watt remains unchanged")
 
         else:
-            logging.warning(f"Inverter {inverter_config['SERIAL']} not reachable")
+            logger.warning(f"Inverter {inverter_config['SERIAL']} not reachable")
 
         sys.stdout.flush() 
 
