@@ -232,7 +232,7 @@ def dynamic_inverter_control(obj):
             for i in data["inverters"]:
                 if i["serial"] == inverter_config["SERIAL"]:
                     configured = True
-                    reachable = i["reachable"]
+                    dtu_reachable = i["reachable"]
                     current_limit = int(i["limit_absolute"])
                     power = i["AC"]["0"]["Power"]["v"]
 
@@ -247,23 +247,28 @@ def dynamic_inverter_control(obj):
         try:
             pm_power = pm_client.get_meter()
             pm_total_power = pm_power["total"]
+            pm_reachable = True
         except Exception as e:
             logger.critical(f"ERROR: {e}")
+            pm_reachable = False
             pm_total_power = 0
             
         logger.info(f"Purchase from network operator: {round(pm_total_power, 1)} Watt")
         logger.info(f"PV production: {round(power, 1)} Watt")
         logger.info(f"Total consumption: {round(pm_total_power + power, 1)} Watt")
 
-        if reachable:
-            # Calc new limit
-            new_limit = pm_total_power + current_limit - 5 
+        if dtu_reachable:
+            if pm_reachable:
+                # Calc new limit
+                new_limit = pm_total_power + current_limit - 5 
 
-            if new_limit > int(inverter_config["MAX"]):
-                new_limit = int(inverter_config["MAX"])
-            elif new_limit < int(inverter_config["MIN"]):
+                if new_limit > int(inverter_config["MAX"]):
+                    new_limit = int(inverter_config["MAX"])
+                elif new_limit < int(inverter_config["MIN"]):
+                    new_limit = int(inverter_config["MIN"])
+            else:
                 new_limit = int(inverter_config["MIN"])
-                
+
             if new_limit != current_limit:
                 # Set new limit
                 logger.info(f'Set inverter limit from {round(current_limit, 1)} to {round(new_limit, 1)} Watt')
