@@ -232,7 +232,7 @@ def dynamic_inverter_control(obj):
             for i in data["inverters"]:
                 if i["serial"] == inverter_config["SERIAL"]:
                     configured = True
-                    dtu_reachable = i["reachable"]
+                    inverter_reachable = i["reachable"]
                     current_limit = int(i["limit_absolute"])
                     power = i["AC"]["0"]["Power"]["v"]
 
@@ -257,7 +257,7 @@ def dynamic_inverter_control(obj):
         logger.info(f"PV production: {round(power, 1)} Watt")
         logger.info(f"Total consumption: {round(pm_total_power + power, 1)} Watt")
 
-        if dtu_reachable:
+        if inverter_reachable:
             if pm_reachable:
                 # Calc new limit
                 new_limit = pm_total_power + current_limit - 5 
