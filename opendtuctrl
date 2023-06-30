@@ -26,6 +26,14 @@ class Shelly:
             auth=self.auth,
             timeout=5,
             )
+
+    def _set(self, path):
+        return requests.post(
+            url=f'{self.host}{path}',
+            headers=self.headers,
+            auth=self.auth,
+            timeout=5,
+            )
     
 
     def get_meter(self):
@@ -52,6 +60,9 @@ class Shelly:
 
     def get_status(self):
         return self._get("/status")
+
+    def set_relays(self, state):
+        return self._set(f"/relay/0?turn={state}")
 
 
 class OpenDtu:
@@ -160,7 +171,7 @@ def set_limit(obj, limit, serial):
         exit(1)
 
 
-@cli.command("show-powermeter")
+@cli.command("powermeter")
 @click.pass_obj
 def powermeter(obj):
     """Show powermeter values"""
@@ -179,21 +190,31 @@ def powermeter(obj):
         exit(1)
 
 
-@cli.command("show-emergency-stop")
+@cli.command("emergency-stop")
+@click.option("--set", help="Set relays state [on,off]")
 @click.pass_obj
-def emergency_stop(obj):
-    """Show emergency powermeter and switch state"""
+def emergency_stop(obj, set):
+    """Show/control emergency stop relays"""
     em_config = obj["config"]["EMERGENCY_STOP"]
 
     if em_config["TYPE"] == "shelly":
-        pm_client = Shelly(em_config["HOST"], em_config["USER"], em_config["PASSWORD"])
+        em_client = Shelly(em_config["HOST"], em_config["USER"], em_config["PASSWORD"])
     else:
         click.echo("No support for this device type")
         exit(1)
 
+    if set:
+        em_client.set_relays(set)
+
+    click.echo(f"Max inpute before emergency stop: {em_config['MAX']} Watt")
     try:
-        power = pm_client.get_meter()
-        click.echo(power)
+        power = em_client.get_meter()
+        click.echo(f"Actual power imput: {power['total']} Watt")
+        relays_status = em_client.get_status().json()["relays"][0]["ison"]
+        if relays_status:
+            click.echo(f"Relays is ON")
+        else:
+            click.echo(f"Relays is OFF")
     except Exception as e:
         click.echo(e)
         exit(1)
@@ -207,7 +228,7 @@ def dynamic_inverter_control(obj):
     dtu_config = obj["config"]["DTU"]
     pm_config = obj["config"]["POWERMETER"]
     inverter_config = obj["config"]["INVERTER"]
-    emergency_stop_config = obj["config"]["EMERGENCY_STOP"]
+    em_config = obj["config"]["EMERGENCY_STOP"]
 
     logpath = "/var/log/opendtuctrl/dic.log"
     logger = logging.getLogger("Dic rotating log")
@@ -307,8 +328,8 @@ def dynamic_inverter_control(obj):
 
         else:
             logger.warning(f"Inverter {inverter_config['SERIAL']} not reachable")
-            if emergency_stop_config["TYPE"] == "shelly":
-                em_client = Shelly(emergency_stop_config["HOST"], emergency_stop_config["USER"], emergency_stop_config["PASSWORD"])
+            if em_config["TYPE"] == "shelly":
+                em_client = Shelly(em_config["HOST"], em_config["USER"], em_config["PASSWORD"])
             else:
                 click.echo("No support for this type of powermeter")
                 exit(1)
@@ -316,11 +337,12 @@ def dynamic_inverter_control(obj):
                 em_stop = em_client.get_meter()
                 em_stop_total_power = em_stop["total"]
             except Exception as e:
-                logger.critical(f"EMERGENCY_STOP not reachable\n{e}")
+                logger.critical(f"EMERGENCY STOP RELAYS not reachable\n{e}")
 
-            if em_stop_total_power > emergency_stop_config["MAX"]:
-                logger.critical(f"Inverter not reachable, but it imputs more then {emergency_stop_config['MAX']}. Trigger emergency stop!")
-
+            if em_stop_total_power > em_config["MAX"]:
+                em_client.set_relays("off")
+                logger.critical(f"Inverter not reachable, but it imputs more then {em_config['MAX']}. "
+                                f"Trigger emergency stop relays!")
 
         sys.stdout.flush() 
 
