@@ -21,3 +21,10 @@ HOST = x.x.x.x
 USER = admin
 PASSWORD = password
 
+[EMERGENCY_STOP]
+MAX = 800
+TYPE = shelly
+HOST = x.x.x.x
+USER = admin
+PASSWORD = password
+

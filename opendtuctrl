@@ -179,6 +179,26 @@ def powermeter(obj):
         exit(1)
 
 
+@cli.command("show-emergency-stop")
+@click.pass_obj
+def emergency_stop(obj):
+    """Show emergency powermeter and switch state"""
+    em_config = obj["config"]["EMERGENCY_STOP"]
+
+    if em_config["TYPE"] == "shelly":
+        pm_client = Shelly(em_config["HOST"], em_config["USER"], em_config["PASSWORD"])
+    else:
+        click.echo("No support for this device type")
+        exit(1)
+
+    try:
+        power = pm_client.get_meter()
+        click.echo(power)
+    except Exception as e:
+        click.echo(e)
+        exit(1)
+
+
 @cli.command("dynamic-inverter-control")
 @click.pass_obj
 def dynamic_inverter_control(obj):
@@ -187,6 +207,7 @@ def dynamic_inverter_control(obj):
     dtu_config = obj["config"]["DTU"]
     pm_config = obj["config"]["POWERMETER"]
     inverter_config = obj["config"]["INVERTER"]
+    emergency_stop_config = obj["config"]["EMERGENCY_STOP"]
 
     logpath = "/var/log/opendtuctrl/dic.log"
     logger = logging.getLogger("Dic rotating log")
@@ -286,6 +307,20 @@ def dynamic_inverter_control(obj):
 
         else:
             logger.warning(f"Inverter {inverter_config['SERIAL']} not reachable")
+            if emergency_stop_config["TYPE"] == "shelly":
+                em_client = Shelly(emergency_stop_config["HOST"], emergency_stop_config["USER"], emergency_stop_config["PASSWORD"])
+            else:
+                click.echo("No support for this type of powermeter")
+                exit(1)
+            try:
+                em_stop = em_client.get_meter()
+                em_stop_total_power = em_stop["total"]
+            except Exception as e:
+                logger.critical(f"EMERGENCY_STOP not reachable\n{e}")
+
+            if em_stop_total_power > emergency_stop_config["MAX"]:
+                logger.critical(f"Inverter not reachable, but it imputs more then {emergency_stop_config['MAX']}. Trigger emergency stop!")
+
 
         sys.stdout.flush() 
 
