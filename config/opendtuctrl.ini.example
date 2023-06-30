@@ -28,3 +28,10 @@ HOST = x.x.x.x
 USER = admin
 PASSWORD = password
 
+[MAIL]
+FROM = test@test.test
+PW = password
+TO = test@test.test
+SMTP = smtp.gmail.com
+PORT = 587
+

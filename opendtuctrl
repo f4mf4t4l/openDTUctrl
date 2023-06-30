@@ -9,6 +9,9 @@ import datetime
 import click
 import json
 import configparser
+import smtplib
+import ssl
+from email.message import EmailMessage
 import humanfriendly.tables as _hf_tables
 
 
@@ -206,10 +209,10 @@ def emergency_stop(obj, set):
     if set:
         em_client.set_relays(set)
 
-    click.echo(f"Max inpute before emergency stop: {em_config['MAX']} Watt")
+    click.echo(f"Max input before emergency stop: {em_config['MAX']} Watt (if inverter not reachable)")
     try:
         power = em_client.get_meter()
-        click.echo(f"Actual power imput: {power['total']} Watt")
+        click.echo(f"Actual power input: {power['total']} Watt")
         relays_status = em_client.get_status().json()["relays"][0]["ison"]
         if relays_status:
             click.echo(f"Relays is ON")
@@ -218,6 +221,26 @@ def emergency_stop(obj, set):
     except Exception as e:
         click.echo(e)
         exit(1)
+
+
+@cli.command("mailtest")
+@click.pass_obj
+def mailtest(obj):
+    """Send a testmail"""
+
+    mail_config = obj["config"]["MAIL"]
+
+    if click.confirm(f"Send testmail to {mail_config['TO']}?"):
+        _send_mail(
+            mail_config["FROM"],
+            mail_config["TO"],
+            mail_config["PW"],
+            mail_config["SMTP"],
+            mail_config["PORT"],
+            "openDTUctrl Testmail",
+            "This is a testmail from openDTUctrl",
+        )
+        click.echo("Mail sent")
 
 
 @cli.command("dynamic-inverter-control")
@@ -229,6 +252,11 @@ def dynamic_inverter_control(obj):
     pm_config = obj["config"]["POWERMETER"]
     inverter_config = obj["config"]["INVERTER"]
     em_config = obj["config"]["EMERGENCY_STOP"]
+    mail_config = obj["config"]["MAIL"]
+
+    context = ssl.create_default_context()
+    session = smtplib.SMTP(mail_config["SMTP"], mail_config["PORT"])
+    session.starttls(context=context)
 
     logpath = "/var/log/opendtuctrl/dic.log"
     logger = logging.getLogger("Dic rotating log")
@@ -337,12 +365,30 @@ def dynamic_inverter_control(obj):
                 em_stop = em_client.get_meter()
                 em_stop_total_power = em_stop["total"]
             except Exception as e:
-                logger.critical(f"EMERGENCY STOP RELAYS not reachable\n{e}")
+                logger.warning(f"EMERGENCY STOP RELAYS not reachable\n{e}")
+                _send_mail(
+                    mail_config["FROM"],
+                    mail_config["TO"],
+                    mail_config["PW"],
+                    mail_config["SMTP"],
+                    mail_config["PORT"],
+                    "openDTUctrl WARNING",
+                    "EMERGENCY STOP RELAYS not reachable",
+                )
 
             if em_stop_total_power > em_config["MAX"]:
                 em_client.set_relays("off")
                 logger.critical(f"Inverter not reachable, but it imputs more then {em_config['MAX']}. "
                                 f"Trigger emergency stop relays!")
+                _send_mail(
+                    mail_config["FROM"],
+                    mail_config["TO"],
+                    mail_config["PW"],
+                    mail_config["SMTP"],
+                    mail_config["PORT"],
+                    "openDTUctrl EMERGENCY STOP RELAYS triggered",
+                    f"Inverter not reachable, but it imputs more then {em_config['MAX']}.",
+                )
 
         sys.stdout.flush() 
 
@@ -357,6 +403,21 @@ def dynamic_inverter_control(obj):
         else:
             _run()
         time.sleep(int(dtu_config["INTERVAL"]))
+
+
+def _send_mail(_from, _to, _pw, _smtp, _port, _subject, _content):
+    context = ssl.create_default_context()
+    session = smtplib.SMTP(_smtp, _port)
+    session.starttls(context=context)
+
+    session.login(_from, _pw)
+    msg = EmailMessage()
+    msg["Subject"] = _subject
+    msg["From"] = _from
+    msg["To"] = _to
+    msg.set_content(_content)
+    session.send_message(msg)
+    session.quit()
 
 
 def time_in_range(start, end, current):
