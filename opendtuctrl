@@ -41,13 +41,17 @@ class Shelly:
 
     def get_meter(self):
         try:
-            # Default paths for shelly 3EM
+            # shelly EM series
             phase_a = self._get("/emeter/0").json()["power"]
-            phase_b = self._get("/emeter/1").json()["power"]    
-            phase_c = self._get("/emeter/2").json()["power"]    
-            total = phase_a + phase_b + phase_c
+            try:
+                phase_b = self._get("/emeter/1").json()["power"]
+                phase_c = self._get("/emeter/2").json()["power"]
+                total = phase_a + phase_b + phase_c
+            except Exception:
+                phase_b = None
+                phase_c = None
+                total = phase_a
         except Exception:
-            # Default path for other one phase shelly devices
             phase_a = self._get("/meter/0").json()["power"]
             phase_b = None
             phase_c = None
