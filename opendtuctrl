@@ -17,8 +17,8 @@ import humanfriendly.tables as _hf_tables
 def _client(_type, _host, _user, _pw):
     if _type == "shelly":
         return Shelly(_host, _user, _pw)
-    #elif _type == "shelly_rpc_gen2":
-    #    return ShellyRpcGen2(_host, _user, _pw)
+    elif _type == "shelly_gen2":
+        return ShellyGen2(_host, _user, _pw)
     else:
         click.echo("No support for this device type")
         exit(1)
@@ -79,6 +79,30 @@ class Shelly:
 
     def set_relays(self, state):
         return self._set(f"/relay/0?turn={state}")
+
+
+class ShellyGen2:
+    def __init__(self, host, user, pw):
+        self.auth = HTTPBasicAuth(user, pw)
+        self.host = f"http://{host}/rpc"
+        self.headers = {"Content-Type": "application/json"}
+
+    def _post(self, method, params=None):
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": method,
+            "params": params or {}
+        }
+        return requests.post(self.host, data=json.dumps(payload), headers=self.headers, auth=self.auth)
+
+
+    def get_info(self):
+        return self._post("Shelly.GetDeviceInfo")
+
+
+    def get_status(self):
+        return self._post("Shelly.GetStatus")
 
 
 class OpenDtu:
