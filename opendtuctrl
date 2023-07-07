@@ -14,6 +14,15 @@ import ssl
 from email.message import EmailMessage
 import humanfriendly.tables as _hf_tables
 
+def _client(_type, _host, _user, _pw):
+    if _type == "shelly":
+        return Shelly(_host, _user, _pw)
+    #elif _type == "shelly_rpc_gen2":
+    #    return ShellyRpcGen2(_host, _user, _pw)
+    else:
+        click.echo("No support for this device type")
+        exit(1)
+
 
 class Shelly:
     def __init__(self, host, user, pw):
@@ -183,11 +192,7 @@ def set_limit(obj, limit, serial):
 def powermeter(obj):
     """Show powermeter values"""
     pm_config = obj["config"]["POWERMETER"]
-    if pm_config["TYPE"] == "shelly":
-        pm_client = Shelly(pm_config["HOST"], pm_config["USER"], pm_config["PASSWORD"])
-    else:
-        click.echo("No support for this device type")
-        exit(1)
+    pm_client = _client(pm_config["TYPE"], pm_config["HOST"], pm_config["USER"], pm_config["PASSWORD"])
 
     try:
         power = pm_client.get_meter()
@@ -202,13 +207,9 @@ def powermeter(obj):
 @click.pass_obj
 def emergency_stop(obj, set):
     """Show/control emergency stop relays"""
-    em_config = obj["config"]["EMERGENCY_STOP"]
 
-    if em_config["TYPE"] == "shelly":
-        em_client = Shelly(em_config["HOST"], em_config["USER"], em_config["PASSWORD"])
-    else:
-        click.echo("No support for this device type")
-        exit(1)
+    em_config = obj["config"]["EMERGENCY_STOP"]
+    em_client = _client(em_config["TYPE"], em_config["HOST"], em_config["USER"], em_config["PASSWORD"])
 
     if set:
         em_client.set_relays(set)
@@ -274,12 +275,7 @@ def dynamic_inverter_control(obj):
     loghandler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
     logger.addHandler(loghandler)
 
-
-    if pm_config["TYPE"] == "shelly":
-        pm_client = Shelly(pm_config["HOST"], pm_config["USER"], pm_config["PASSWORD"])
-    else:
-        click.echo("No support for this type of powermeter")
-        exit(1)
+    pm_client = _client(pm_config["TYPE"], pm_config["HOST"], pm_config["USER"], pm_config["PASSWORD"])
 
     if int(dtu_config["INTERVAL"]) < 4:
         click.echo("Check interval must <= 5 seconds")
@@ -369,7 +365,8 @@ def dynamic_inverter_control(obj):
                 em_stop = em_client.get_meter()
                 em_stop_total_power = em_stop["total"]
             except Exception as e:
-                logger.warning(f"EMERGENCY STOP RELAYS not reachable\n{e}")
+                msg = f"EMERGENCY STOP RELAYS not reachable\n{e}"
+                logger.warning(msg)
                 _send_mail(
                     mail_config["FROM"],
                     mail_config["TO"],
@@ -377,13 +374,14 @@ def dynamic_inverter_control(obj):
                     mail_config["SMTP"],
                     mail_config["PORT"],
                     "openDTUctrl WARNING",
-                    "EMERGENCY STOP RELAYS not reachable",
+                    msg,
                 )
 
-            if em_stop_total_power > em_config["MAX"]:
+            if str(em_stop_total_power) > str(em_config["MAX"]):
+                msg = f"Inverter not reachable, but it imputs more then {em_config['MAX']}. "\
+                      f"Trigger emergency stop relays!"
+                logger.critical(msg)
                 em_client.set_relays("off")
-                logger.critical(f"Inverter not reachable, but it imputs more then {em_config['MAX']}. "
-                                f"Trigger emergency stop relays!")
                 _send_mail(
                     mail_config["FROM"],
                     mail_config["TO"],
@@ -391,7 +389,7 @@ def dynamic_inverter_control(obj):
                     mail_config["SMTP"],
                     mail_config["PORT"],
                     "openDTUctrl EMERGENCY STOP RELAYS triggered",
-                    f"Inverter not reachable, but it imputs more then {em_config['MAX']}.",
+                    msg,
                 )
 
         sys.stdout.flush() 
@@ -426,7 +424,6 @@ def _send_mail(_from, _to, _pw, _smtp, _port, _subject, _content):
 
 def time_in_range(start, end, current):
     return start <= current <= end
-
 
 
 if __name__ == "__main__":
