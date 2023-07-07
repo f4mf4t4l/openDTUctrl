@@ -401,7 +401,7 @@ def dynamic_inverter_control(obj):
                     msg,
                 )
 
-            if str(em_stop_total_power) > str(em_config["MAX"]):
+            if int(em_stop_total_power) > int(em_config["MAX"]):
                 msg = f"Inverter not reachable, but it imputs more then {em_config['MAX']}. "\
                       f"Trigger emergency stop relays!"
                 logger.critical(msg)
