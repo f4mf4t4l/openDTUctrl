@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-import requests 
-import time 
+import requests
+import time
 import sys
 from requests.auth import HTTPBasicAuth
+from requests.auth import HTTPDigestAuth
 import logging
 from logging.handlers import TimedRotatingFileHandler
 import datetime
@@ -13,6 +14,8 @@ import smtplib
 import ssl
 from email.message import EmailMessage
 import humanfriendly.tables as _hf_tables
+
+
 
 def _client(_type, _host, _user, _pw):
     if _type == "shelly":
@@ -30,14 +33,13 @@ class Shelly:
         self.headers = {'Content-Type': 'application/json'}
         self.host = f'http://{host}'
 
-    
     def _get(self, path):
         return requests.get(
             url=f'{self.host}{path}',
             headers=self.headers,
             auth=self.auth,
             timeout=5,
-            )
+        )
 
     def _set(self, path):
         return requests.post(
@@ -45,8 +47,7 @@ class Shelly:
             headers=self.headers,
             auth=self.auth,
             timeout=5,
-            )
-    
+        )
 
     def get_meter(self):
         try:
@@ -67,12 +68,11 @@ class Shelly:
             total = phase_a
 
         return {
-            "phase_a" : phase_a,
-            "phase_b" : phase_b,
-            "phase_c" : phase_c,
-            "total" : total,
+            "phase_a": phase_a,
+            "phase_b": phase_b,
+            "phase_c": phase_c,
+            "total": total,
         }
-    
 
     def get_status(self):
         return self._get("/status")
@@ -80,10 +80,13 @@ class Shelly:
     def set_relays(self, state):
         return self._set(f"/relay/0?turn={state}")
 
+    def get_relays_status(self):
+        return self._get("/status").json()["relays"][0]["ison"]
+
 
 class ShellyGen2:
     def __init__(self, host, user, pw):
-        self.auth = HTTPBasicAuth(user, pw)
+        self.auth = HTTPDigestAuth(user, pw)
         self.host = f"http://{host}/rpc"
         self.headers = {"Content-Type": "application/json"}
 
@@ -94,15 +97,41 @@ class ShellyGen2:
             "method": method,
             "params": params or {}
         }
-        return requests.post(self.host, data=json.dumps(payload), headers=self.headers, auth=self.auth)
-
+        return requests.post(
+            self.host,
+            data=json.dumps(payload),
+            headers=self.headers,
+            auth=self.auth
+        )
 
     def get_info(self):
         return self._post("Shelly.GetDeviceInfo")
 
-
     def get_status(self):
         return self._post("Shelly.GetStatus")
+
+    def set_relays(self, state):
+        if state == "on":
+            on_param = True
+        elif state == "off":
+            on_param = False
+        else:
+            return
+        return self._post(
+            "Switch.Set",
+            params={
+                "id": 0,
+                "on": on_param,
+            })
+
+    def get_relays_status(self):
+        status = self._post("Shelly.GetStatus")
+        return status.json()["result"]["switch:0"]["output"]
+
+    def get_meter(self):
+        status = self._post("Shelly.GetStatus")
+        power = status.json()["result"]["switch:0"]["apower"]
+        return {"total": power}
 
 
 class OpenDtu:
@@ -112,15 +141,13 @@ class OpenDtu:
         self.headers = {'Content-Type': 'application/x-www-form-urlencoded'}
         self.host = f'http://{host}/api'
 
-
     def _get(self, path):
         return requests.get(
             url=f'{self.host}{path}',
             auth=self.auth,
             headers=self.headers,
             timeout=5,
-            )
-    
+        )
 
     def _post(self, path, data):
         return requests.post(
@@ -129,21 +156,18 @@ class OpenDtu:
             headers=self.headers,
             data=data,
             timeout=5,
-            )
-
+        )
 
     def get_livedata(self):
         return self._get("/livedata/status/inverters")
 
-
     def get_data(self, path):
         return self._get(path)
-    
-    
+
     def set_limit(self, limit, serial):
         data = f'data={{"serial":"{serial}", "limit_type":0, "limit_value":{limit}}}'
         return self._post("/limit/config", data)
-    
+
 
 @click.group()
 @click.pass_obj
@@ -154,7 +178,7 @@ def cli(obj):
     dtu_config = config["DTU"]
     obj["dtu01"] = OpenDtu(dtu_config["DTU01"], dtu_config["USER"], dtu_config["PASSWORD"])
     obj["dtu02"] = OpenDtu(dtu_config["DTU02"], dtu_config["USER"], dtu_config["PASSWORD"])
-    
+
 
 @cli.command("get-data")
 @click.argument("path")
@@ -180,7 +204,8 @@ def list_inverters(obj, raw):
         click.echo(json.dumps(livedata))
     else:
         data = []
-        columns = ["Name", "Serial", "Reachable", "Producing", "Power(Watt)", "Limit Relative(%)", "Limit absolute(Watt)"]
+        columns = ["Name", "Serial", "Reachable", "Producing", "Power(Watt)", "Limit Relative(%)",
+                   "Limit absolute(Watt)"]
         for j in livedata["inverters"]:
             data.append(
                 [
@@ -242,7 +267,7 @@ def emergency_stop(obj, set):
     try:
         power = em_client.get_meter()
         click.echo(f"Actual power input: {power['total']} Watt")
-        relays_status = em_client.get_status().json()["relays"][0]["ison"]
+        relays_status = em_client.get_relays_status()
         if relays_status:
             click.echo(f"Relays is ON")
         else:
@@ -346,7 +371,7 @@ def dynamic_inverter_control(obj):
             logger.critical(f"ERROR: {e}")
             pm_reachable = False
             pm_total_power = 0
-            
+
         logger.info(f"Purchase from network operator: {round(pm_total_power, 1)} Watt")
         logger.info(f"PV production: {round(power, 1)} Watt")
         logger.info(f"Total consumption: {round(pm_total_power + power, 1)} Watt")
@@ -354,7 +379,7 @@ def dynamic_inverter_control(obj):
         if inverter_reachable:
             if pm_reachable:
                 # Calc new limit
-                new_limit = pm_total_power + current_limit - 5 
+                new_limit = pm_total_power + current_limit - 5
 
                 if new_limit > int(inverter_config["MAX"]):
                     new_limit = int(inverter_config["MAX"])
@@ -402,7 +427,7 @@ def dynamic_inverter_control(obj):
                 )
 
             if int(em_stop_total_power) > int(em_config["MAX"]):
-                msg = f"Inverter not reachable, but it imputs more then {em_config['MAX']}. "\
+                msg = f"Inverter not reachable, but it imputs more then {em_config['MAX']}. " \
                       f"Trigger emergency stop relays!"
                 logger.critical(msg)
                 em_client.set_relays("off")
@@ -416,7 +441,7 @@ def dynamic_inverter_control(obj):
                     msg,
                 )
 
-        sys.stdout.flush() 
+        sys.stdout.flush()
 
     while True:
 
@@ -452,4 +477,3 @@ def time_in_range(start, end, current):
 
 if __name__ == "__main__":
     cli(obj={})
-
