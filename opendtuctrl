@@ -334,6 +334,9 @@ def dynamic_inverter_control(obj):
     click.echo(f"Start inverter control\nCheck interval = {dtu_config['INTERVAL']} seconds")
 
     def _run():
+        power = 0
+        inverter_reachable = False
+        current_limit = 0
         # Get inverter data
         try:
             try:
@@ -360,7 +363,7 @@ def dynamic_inverter_control(obj):
                 exit(1)
 
         except Exception as e:
-            logger.critical(f"ERROR: {e}")
+            logger.critical(f"DTU ERROR: {e}")
 
         # Get powermeter data
         try:
